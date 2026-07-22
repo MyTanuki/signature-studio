@@ -371,7 +371,9 @@ export default function SignatureStudio() {
 
   useEffect(() => {
     if (process.env.NODE_ENV !== "production" || !("serviceWorker" in navigator)) return;
-    void navigator.serviceWorker.register("/sw.js").catch(() => undefined);
+    void navigator.serviceWorker
+      .register(`${import.meta.env.BASE_URL}sw.js`)
+      .catch(() => undefined);
   }, []);
 
   useEffect(() => {
