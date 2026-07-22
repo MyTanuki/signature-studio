@@ -46,9 +46,15 @@ interface Preset {
   values: Partial<Settings>;
 }
 
+interface InkColorPreset {
+  name: string;
+  value: string;
+}
+
 const MAX_FILES = 200;
 const MAX_DIMENSION = 5_000;
 const STORAGE_KEY = "signature-studio-preferences-v1";
+const DEFAULT_CUSTOM_INK_COLOR = "#172554";
 
 const DEFAULT_SETTINGS: Settings = {
   outputWidth: 900,
@@ -58,6 +64,7 @@ const DEFAULT_SETTINGS: Settings = {
   removal: 30,
   feather: 18,
   contrast: 12,
+  inkColor: null,
   grayscale: false,
   autoCrop: true,
   rotation: 0,
@@ -67,6 +74,14 @@ const DEFAULT_SETTINGS: Settings = {
   alignX: "center",
   alignY: "center",
 };
+
+const INK_COLOR_PRESETS: InkColorPreset[] = [
+  { name: "น้ำเงินเที่ยงคืน", value: "#0F172A" },
+  { name: "กรมท่า", value: "#172554" },
+  { name: "น้ำเงินเข้ม", value: "#1E3A8A" },
+  { name: "น้ำเงินองค์กร", value: "#1E40AF" },
+  { name: "น้ำเงินหมึก", value: "#233876" },
+];
 
 const PRESETS: Preset[] = [
   {
@@ -1036,6 +1051,47 @@ export default function SignatureStudio() {
               <RangeField label="ลบพื้นหลังสีขาว" value={settings.removal} min={0} max={100} suffix="" onChange={(value) => commitSettings({ removal: value })} />
               <RangeField label="ความนุ่มของขอบ" value={settings.feather} min={0} max={60} suffix="" onChange={(value) => commitSettings({ feather: value })} />
               <RangeField label="ความคมชัด" value={settings.contrast} min={-40} max={60} suffix="" onChange={(value) => commitSettings({ contrast: value })} />
+
+              <div className="ink-color-field">
+                <div className="ink-color-heading">
+                  <span>สีลายเซ็น</span>
+                  <output>{settings.inkColor ?? "สีต้นฉบับ"}</output>
+                </div>
+                <div className="ink-color-grid" role="group" aria-label="ชุดสีลายเซ็น">
+                  <button
+                    type="button"
+                    className={`ink-color-original${settings.inkColor === null ? " active" : ""}`}
+                    onClick={() => commitSettings({ inkColor: null })}
+                    aria-pressed={settings.inkColor === null}
+                  >
+                    ต้นฉบับ
+                  </button>
+                  {INK_COLOR_PRESETS.map((preset) => (
+                    <button
+                      key={preset.value}
+                      type="button"
+                      className={`ink-color-swatch${settings.inkColor === preset.value ? " active" : ""}`}
+                      style={{ "--ink-color": preset.value } as CSSProperties}
+                      onClick={() => commitSettings({ inkColor: preset.value })}
+                      aria-label={`${preset.name} ${preset.value}`}
+                      aria-pressed={settings.inkColor === preset.value}
+                      title={`${preset.name} ${preset.value}`}
+                    />
+                  ))}
+                </div>
+                <label className="custom-color-picker">
+                  <span>เลือกจากตารางสี</span>
+                  <span>
+                    <input
+                      type="color"
+                      value={settings.inkColor ?? DEFAULT_CUSTOM_INK_COLOR}
+                      onChange={(event) => commitSettings({ inkColor: event.target.value.toUpperCase() })}
+                      aria-label="เลือกสีลายเซ็นจากตารางสี"
+                    />
+                    <code>{settings.inkColor ?? DEFAULT_CUSTOM_INK_COLOR}</code>
+                  </span>
+                </label>
+              </div>
 
               <div className="background-choice" role="group" aria-label="พื้นหลังผลลัพธ์">
                 <button className={settings.background === "transparent" ? "active" : ""} type="button" onClick={() => commitSettings({ background: "transparent" })}><span className="choice-swatch checkerboard" /> โปร่งใส</button>

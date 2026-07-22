@@ -407,6 +407,22 @@ select:focus-visible,
 .range-heading { display: flex; align-items: center; justify-content: space-between; }
 .range-heading output { min-width: 42px; padding: 2px 5px; border: 1px solid var(--border-soft); border-radius: 5px; background: var(--surface-subtle); color: #344054; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 9px; text-align: center; }
 input[type="range"] { height: 4px; border-radius: 99px; accent-color: var(--primary); }
+.ink-color-field { display: flex; gap: 8px; margin: 2px 0 14px; flex-direction: column; }
+.ink-color-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.ink-color-heading > span { color: #475467; font-size: 10px; font-weight: 650; }
+.ink-color-heading output { color: var(--text-muted); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 8px; }
+.ink-color-grid { display: grid; grid-template-columns: minmax(62px, 1fr) repeat(5, 30px); gap: 6px; }
+.ink-color-grid button { height: 30px; border: 1px solid var(--border); border-radius: 7px; background: #fff; }
+.ink-color-grid button:hover { border-color: #98a2b3; }
+.ink-color-grid button.active { border-color: var(--primary); box-shadow: 0 0 0 2px var(--primary-soft); }
+.ink-color-original { padding: 0 7px; color: #475467; font-size: 8px; font-weight: 650; }
+.ink-color-original.active { background: var(--primary-soft); color: var(--primary); }
+.ink-color-swatch { position: relative; padding: 4px; }
+.ink-color-swatch::before { display: block; width: 100%; height: 100%; border-radius: 4px; background: var(--ink-color); content: ""; }
+.custom-color-picker { display: flex; min-height: 36px; align-items: center; justify-content: space-between; gap: 10px; padding: 5px 7px 5px 10px; border: 1px solid var(--border-soft); border-radius: 7px; background: var(--surface-subtle); color: #475467; font-size: 9px; font-weight: 650; }
+.custom-color-picker > span:last-child { display: flex; align-items: center; gap: 7px; }
+.custom-color-picker input[type="color"] { width: 32px; height: 24px; padding: 2px; border: 1px solid var(--border); border-radius: 5px; background: #fff; cursor: pointer; }
+.custom-color-picker code { min-width: 52px; color: #344054; font-size: 8px; font-weight: 650; }
 .alignment-field { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .alignment-grid { display: grid; width: 66px; height: 48px; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
 .alignment-grid button { display: grid; padding: 0; place-items: center; border: 0; border-right: 1px solid var(--border-soft); border-bottom: 1px solid var(--border-soft); background: #fff; }

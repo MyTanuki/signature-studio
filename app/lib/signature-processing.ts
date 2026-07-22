@@ -13,6 +13,8 @@ export interface Settings {
   feather: number;
   /** Contrast adjustment from -100 to 100. Zero leaves contrast unchanged. */
   contrast: number;
+  /** Hex color used to recolor visible signature ink. Null preserves source colors. */
+  inkColor: string | null;
   grayscale: boolean;
   autoCrop: boolean;
   rotation: number;
@@ -51,6 +53,7 @@ interface Bounds {
 
 const MAX_SOURCE_DIMENSION = 5_000;
 const SQRT_THREE = Math.sqrt(3);
+const HEX_COLOR_PATTERN = /^#[0-9a-f]{6}$/i;
 
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, value));
@@ -92,6 +95,18 @@ function visibleDarkness(
 ): number {
   const luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
   return (255 - luminance) * (alpha / 255);
+}
+
+function parseHexColor(value: string): [number, number, number] {
+  if (!HEX_COLOR_PATTERN.test(value)) {
+    throw new TypeError("inkColor must be a six-digit hex color.");
+  }
+
+  return [
+    Number.parseInt(value.slice(1, 3), 16),
+    Number.parseInt(value.slice(3, 5), 16),
+    Number.parseInt(value.slice(5, 7), 16),
+  ];
 }
 
 function isForegroundPixel(
@@ -185,6 +200,10 @@ function filterPixels(canvas: HTMLCanvasElement, settings: Settings): void {
   const contrast = clamp(settings.contrast, -100, 100);
   const contrastFactor = (100 + contrast) / 100;
 
+  const inkColor = settings.inkColor
+    ? parseHexColor(settings.inkColor)
+    : null;
+
   for (let offset = 0; offset < pixels.length; offset += 4) {
     let red = pixels[offset];
     let green = pixels[offset + 1];
@@ -223,6 +242,12 @@ function filterPixels(canvas: HTMLCanvasElement, settings: Settings): void {
       red = (red - 128) * contrastFactor + 128;
       green = (green - 128) * contrastFactor + 128;
       blue = (blue - 128) * contrastFactor + 128;
+    }
+
+    if (inkColor && alpha > 0) {
+      const inkOpacity = visibleDarkness(red, green, blue, alpha) / 255;
+      [red, green, blue] = inkColor;
+      alpha = 255 * inkOpacity;
     }
 
     pixels[offset] = Math.round(clamp(red, 0, 255));
@@ -307,6 +332,10 @@ function validateSettings(settings: Settings): void {
   assertFinite("feather", settings.feather);
   assertFinite("contrast", settings.contrast);
   assertFinite("rotation", settings.rotation);
+
+  if (settings.inkColor !== null) {
+    parseHexColor(settings.inkColor);
+  }
 
   if (settings.outputWidth <= 0 || settings.outputHeight <= 0) {
     throw new RangeError("Output dimensions must be greater than zero.");

@@ -37,10 +37,11 @@ test("renders the Thai Signature Studio application shell", async () => {
 });
 
 test("keeps processing local and removes starter-only dependencies", async () => {
-  const [page, layout, studio, packageJson, hosting] = await Promise.all([
+  const [page, layout, studio, processing, packageJson, hosting] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/SignatureStudio.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/lib/signature-processing.ts", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
     readFile(new URL("../.openai/hosting.json", import.meta.url), "utf8"),
   ]);
@@ -49,6 +50,11 @@ test("keeps processing local and removes starter-only dependencies", async () =>
   assert.match(layout, /lang="th"/);
   assert.match(studio, /processSignature/);
   assert.match(studio, /localStorage/);
+  assert.match(studio, /สีลายเซ็น/);
+  assert.match(studio, /type="color"/);
+  assert.match(studio, /INK_COLOR_PRESETS/);
+  assert.match(processing, /visibleDarkness\(red, green, blue, alpha\) \/ 255/);
+  assert.match(processing, /inkColor must be a six-digit hex color/);
   assert.doesNotMatch(studio, /fetch\(["']https?:\/\//i);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   assert.deepEqual(JSON.parse(hosting), { d1: null, r2: null });
