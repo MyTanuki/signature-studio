@@ -317,7 +317,7 @@ export default function SignatureStudio() {
   const [historyVersion, setHistoryVersion] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const outputCanvasRef = useRef<HTMLCanvasElement>(null);
-  const previewRef = useRef<HTMLDivElement>(null);
+  const previewStageRef = useRef<HTMLDivElement>(null);
   const undoStack = useRef<Settings[]>([]);
   const redoStack = useRef<Settings[]>([]);
   const objectUrls = useRef<Set<string>>(new Set());
@@ -711,7 +711,7 @@ export default function SignatureStudio() {
   };
 
   const updateSplitFromPointer = (event: ReactPointerEvent<HTMLButtonElement>) => {
-    const container = previewRef.current;
+    const container = previewStageRef.current;
     if (!container) return;
     const rect = container.getBoundingClientRect();
     const move = (pointerEvent: PointerEvent) => {
@@ -897,14 +897,14 @@ export default function SignatureStudio() {
                 </div>
               </div>
 
-              <div className="preview-viewport" ref={previewRef}>
+              <div className="preview-viewport">
                 <div className="ruler ruler-horizontal" aria-hidden={!showRuler} data-visible={showRuler} />
                 <div className="ruler ruler-vertical" aria-hidden={!showRuler} data-visible={showRuler} />
-                <div className="preview-stage" style={{ transform: `scale(${zoom / 100})` }}>
+                <div ref={previewStageRef} className="preview-stage" style={{ aspectRatio: `${settings.outputWidth} / ${settings.outputHeight}`, transform: `scale(${zoom / 100})` }}>
                   {(viewMode === "original" || viewMode === "split") && (
                     <div
                       className="preview-pane original-pane"
-                      style={viewMode === "split" ? { width: `${splitPosition}%` } : undefined}
+                      style={viewMode === "split" ? { clipPath: `inset(0 ${100 - splitPosition}% 0 0)` } : undefined}
                     >
                       <div className="pane-label">ต้นฉบับ</div>
                       <img src={selected.sourceUrl} alt={`ลายเซ็นต้นฉบับ ${selected.name}`} />
@@ -913,7 +913,6 @@ export default function SignatureStudio() {
                   {(viewMode === "output" || viewMode === "split") && (
                     <div
                       className={`preview-pane output-pane ${settings.background === "transparent" ? "checkerboard" : "white-background"}`}
-                      style={viewMode === "split" ? { left: `${splitPosition}%` } : undefined}
                     >
                       <div className="pane-label">ผลลัพธ์</div>
                       <canvas ref={outputCanvasRef} aria-label={`ผลลัพธ์ ${settings.outputWidth} คูณ ${settings.outputHeight} พิกเซล`} />
@@ -1019,10 +1018,10 @@ export default function SignatureStudio() {
               {presetLocked && <div className="locked-note">ค่าหลักถูกล็อกตามมาตรฐานบริษัท ปลดล็อกเพื่อแก้ไข</div>}
 
               <div className="two-column-fields">
-                <label className="field-label"><span>ความกว้าง <small>px</small></span><input type="number" min="120" max="5000" value={settings.outputWidth} disabled={presetLocked} onChange={(event) => commitSettings({ outputWidth: Number(event.target.value) })} /></label>
-                <label className="field-label"><span>ความสูง <small>px</small></span><input type="number" min="80" max="5000" value={settings.outputHeight} disabled={presetLocked} onChange={(event) => commitSettings({ outputHeight: Number(event.target.value) })} /></label>
+                <label className="field-label"><span>ความกว้าง Canvas <small>px</small></span><input type="number" min="120" max="5000" value={settings.outputWidth} disabled={presetLocked} onChange={(event) => commitSettings({ outputWidth: Number(event.target.value) })} /></label>
+                <label className="field-label"><span>ความสูง Canvas <small>px</small></span><input type="number" min="80" max="5000" value={settings.outputHeight} disabled={presetLocked} onChange={(event) => commitSettings({ outputHeight: Number(event.target.value) })} /></label>
               </div>
-              <RangeField label="ความสูงลายเซ็น" value={settings.targetHeight} min={20} max={Math.max(40, settings.outputHeight - settings.margin * 2)} suffix="px" disabled={presetLocked} onChange={(value) => commitSettings({ targetHeight: value })} />
+              <RangeField label="ขนาดลายเซ็น" value={settings.targetHeight} min={20} max={1000} suffix="px" disabled={presetLocked} onChange={(value) => commitSettings({ targetHeight: value })} />
               <RangeField label="ระยะขอบปลอดภัย" value={settings.margin} min={0} max={Math.floor(Math.min(settings.outputWidth, settings.outputHeight) / 3)} suffix="px" disabled={presetLocked} onChange={(value) => commitSettings({ margin: value })} />
 
               <div className="alignment-field">

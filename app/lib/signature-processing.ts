@@ -44,6 +44,14 @@ export interface ProcessedResult {
   quality: QualityReport;
 }
 
+export interface SignaturePlacement {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  scale: number;
+}
+
 interface Bounds {
   x: number;
   y: number;
@@ -313,7 +321,7 @@ function alignmentOffset(
   occupiedSpace: number,
   alignment: "left" | "center" | "right" | "top" | "bottom",
 ): number {
-  const remainingSpace = Math.max(0, availableSpace - occupiedSpace);
+  const remainingSpace = availableSpace - occupiedSpace;
   if (alignment === "center") {
     return remainingSpace / 2;
   }
@@ -321,6 +329,34 @@ function alignmentOffset(
     return remainingSpace;
   }
   return 0;
+}
+
+export function calculateSignaturePlacement(
+  signatureWidth: number,
+  signatureHeight: number,
+  settings: Pick<Settings, "outputWidth" | "outputHeight" | "targetHeight" | "margin" | "alignX" | "alignY">,
+): SignaturePlacement {
+  assertFinite("signatureWidth", signatureWidth);
+  assertFinite("signatureHeight", signatureHeight);
+  if (signatureWidth <= 0 || signatureHeight <= 0) {
+    throw new RangeError("Signature dimensions must be greater than zero.");
+  }
+
+  const outputWidth = Math.ceil(settings.outputWidth);
+  const outputHeight = Math.ceil(settings.outputHeight);
+  const availableWidth = outputWidth - settings.margin * 2;
+  const availableHeight = outputHeight - settings.margin * 2;
+  const scale = settings.targetHeight / signatureHeight;
+  const width = signatureWidth * scale;
+  const height = signatureHeight * scale;
+  const x =
+    settings.margin +
+    alignmentOffset(availableWidth, width, settings.alignX);
+  const y =
+    settings.margin +
+    alignmentOffset(availableHeight, height, settings.alignY);
+
+  return { x, y, width, height, scale };
 }
 
 function validateSettings(settings: Settings): void {
@@ -467,23 +503,11 @@ export async function processSignature(
 
   const outputWidth = Math.ceil(settings.outputWidth);
   const outputHeight = Math.ceil(settings.outputHeight);
-  const margin = settings.margin;
-  const availableWidth = outputWidth - margin * 2;
-  const availableHeight = outputHeight - margin * 2;
-  const scale = Math.min(
-    settings.targetHeight / transformedCanvas.height,
-    availableWidth / transformedCanvas.width,
-    availableHeight / transformedCanvas.height,
+  const placement = calculateSignaturePlacement(
+    transformedCanvas.width,
+    transformedCanvas.height,
+    settings,
   );
-  const drawnWidth = transformedCanvas.width * scale;
-  const drawnHeight = transformedCanvas.height * scale;
-  const drawX =
-    margin +
-    alignmentOffset(availableWidth, drawnWidth, settings.alignX);
-  const drawY =
-    margin +
-    alignmentOffset(availableHeight, drawnHeight, settings.alignY);
-
   const outputCanvas = createCanvas(outputWidth, outputHeight);
   const outputContext = getContext(outputCanvas);
   if (settings.background === "white") {
@@ -496,10 +520,10 @@ export async function processSignature(
   outputContext.imageSmoothingQuality = "high";
   outputContext.drawImage(
     transformedCanvas,
-    drawX,
-    drawY,
-    drawnWidth,
-    drawnHeight,
+    placement.x,
+    placement.y,
+    placement.width,
+    placement.height,
   );
 
   return {
@@ -508,7 +532,7 @@ export async function processSignature(
     sourceHeight,
     cropWidth: cropBounds.width,
     cropHeight: cropBounds.height,
-    scale,
+    scale: placement.scale,
     quality: computeQuality(outputCanvas),
   };
 }

@@ -59,3 +59,62 @@ test("keeps processing local and removes starter-only dependencies", async () =>
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   assert.deepEqual(JSON.parse(hosting), { d1: null, r2: null });
 });
+
+test("keeps the signature aspect ratio independent from canvas dimensions", async () => {
+  const [studio, styles] = await Promise.all([
+    readFile(new URL("../app/SignatureStudio.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/studio-v1.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(studio, /label="ขนาดลายเซ็น"/);
+  assert.match(studio, /ความกว้าง Canvas.*ความสูง Canvas/s);
+  assert.match(
+    studio,
+    /aspectRatio: `\$\{settings\.outputWidth\} \/ \$\{settings\.outputHeight\}`/,
+  );
+  assert.match(
+    studio,
+    /clipPath: `inset\(0 \$\{100 - splitPosition\}% 0 0\)`/,
+  );
+  assert.doesNotMatch(studio, /style=\{viewMode === "split" \? \{ left:/);
+  assert.doesNotMatch(styles, /\.preview-stage[^}]*aspect-ratio:\s*3\s*\/\s*1/s);
+});
+
+test("keeps signature size fixed until the size slider changes", async () => {
+  const {
+    calculateSignaturePlacement,
+  } = await import(
+    new URL("../app/lib/signature-processing.ts", import.meta.url).href,
+  );
+
+  const baseSettings = {
+    targetHeight: 160,
+    margin: 32,
+    alignX: "center",
+    alignY: "center",
+  };
+
+  const compactCanvas = calculateSignaturePlacement(480, 120, {
+    ...baseSettings,
+    outputWidth: 300,
+    outputHeight: 120,
+  });
+  const largeCanvas = calculateSignaturePlacement(480, 120, {
+    ...baseSettings,
+    outputWidth: 1200,
+    outputHeight: 600,
+  });
+  const reducedSignature = calculateSignaturePlacement(480, 120, {
+    ...baseSettings,
+    outputWidth: 1200,
+    outputHeight: 600,
+    targetHeight: 80,
+  });
+
+  assert.equal(compactCanvas.width / compactCanvas.height, 4);
+  assert.equal(largeCanvas.width / largeCanvas.height, 4);
+  assert.equal(compactCanvas.height, 160);
+  assert.equal(largeCanvas.height, 160);
+  assert.equal(reducedSignature.height, 80);
+  assert.equal(reducedSignature.width, 320);
+});

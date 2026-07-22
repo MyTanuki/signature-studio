@@ -322,7 +322,6 @@ select:focus-visible,
 .preview-stage {
   position: relative;
   width: min(92%, 980px);
-  aspect-ratio: 3 / 1;
   overflow: hidden;
   border: 1px solid #b8c2ce;
   border-radius: 4px;
@@ -332,7 +331,7 @@ select:focus-visible,
   transition: transform 120ms ease;
 }
 .preview-pane { position: absolute; inset: 0; display: grid; place-items: center; overflow: hidden; }
-.original-pane { z-index: 2; right: auto; background: #fff; border-right: 1px solid rgb(29 78 216 / 0.6); }
+.original-pane { z-index: 2; background: #fff; }
 .original-pane img { display: block; max-width: 82%; max-height: 74%; object-fit: contain; }
 .output-pane { z-index: 1; }
 .output-pane canvas { display: block; width: 100%; height: 100%; }
@@ -526,7 +525,7 @@ input[type="range"] { height: 4px; border-radius: 99px; accent-color: var(--prim
   .segmented-control { width: 100%; }
   .segmented-control button { flex: 1; }
   .preview-viewport { padding: 22px 12px 32px; }
-  .preview-stage { width: 100%; min-height: 190px; aspect-ratio: 3 / 1; }
+  .preview-stage { width: 100%; }
   .ruler { display: none; }
   .canvas-toolbar { justify-content: flex-start; overflow-x: auto; }
   .canvas-toolbar button:first-child,
