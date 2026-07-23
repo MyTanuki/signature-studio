@@ -59,8 +59,8 @@ const DEFAULT_CUSTOM_INK_COLOR = "#172554";
 const DEFAULT_SETTINGS: Settings = {
   outputWidth: 900,
   outputHeight: 300,
-  targetHeight: 160,
-  margin: 32,
+  targetHeight: 220,
+  margin: 30,
   removal: 30,
   feather: 18,
   contrast: 12,
@@ -80,14 +80,14 @@ const INK_COLOR_PRESETS: InkColorPreset[] = [
   { name: "กรมท่า", value: "#172554" },
   { name: "น้ำเงินเข้ม", value: "#1E3A8A" },
   { name: "น้ำเงินองค์กร", value: "#1E40AF" },
-  { name: "น้ำเงินหมึก", value: "#233876" },
+  { name: "น้ำเงินหมึก", value: "#1F3E98" },
 ];
 
 const PRESETS: Preset[] = [
   {
     id: "company",
     name: "มาตรฐานบริษัท",
-    note: "900 × 300 px · ลายเซ็นสูง 160 px",
+    note: "900 × 300 px · ลายเซ็นสูง 220 px",
     values: DEFAULT_SETTINGS,
   },
   {

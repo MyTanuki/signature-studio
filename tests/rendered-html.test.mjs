@@ -53,6 +53,9 @@ test("keeps processing local and removes starter-only dependencies", async () =>
   assert.match(studio, /สีลายเซ็น/);
   assert.match(studio, /type="color"/);
   assert.match(studio, /INK_COLOR_PRESETS/);
+  assert.match(studio, /outputWidth: 900,\s*outputHeight: 300,\s*targetHeight: 220,\s*margin: 30,/s);
+  assert.match(studio, /note: "900 × 300 px · ลายเซ็นสูง 220 px"/);
+  assert.match(studio, /\{ name: "น้ำเงินหมึก", value: "#1F3E98" \}/);
   assert.match(processing, /visibleDarkness\(red, green, blue, alpha\) \/ 255/);
   assert.match(processing, /inkColor must be a six-digit hex color/);
   assert.doesNotMatch(studio, /fetch\(["']https?:\/\//i);
