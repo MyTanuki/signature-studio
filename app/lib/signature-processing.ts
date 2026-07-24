@@ -13,6 +13,8 @@ export interface Settings {
   feather: number;
   /** Contrast adjustment from -100 to 100. Zero leaves contrast unchanged. */
   contrast: number;
+  /** Extra output-pixel radius added to visible signature ink (0-6). */
+  strokeWidth: number;
   /** Hex color used to recolor visible signature ink. Null preserves source colors. */
   inkColor: string | null;
   grayscale: boolean;
@@ -60,6 +62,7 @@ interface Bounds {
 }
 
 const MAX_SOURCE_DIMENSION = 5_000;
+const MAX_STROKE_WIDTH = 6;
 const SQRT_THREE = Math.sqrt(3);
 const HEX_COLOR_PATTERN = /^#[0-9a-f]{6}$/i;
 
@@ -267,6 +270,98 @@ function filterPixels(canvas: HTMLCanvasElement, settings: Settings): void {
   context.putImageData(imageData, 0, 0);
 }
 
+export function expandStrokePixels(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+  strokeWidth: number,
+): Uint8ClampedArray {
+  assertFinite("width", width);
+  assertFinite("height", height);
+  assertFinite("strokeWidth", strokeWidth);
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) {
+    throw new RangeError("Pixel dimensions must be positive integers.");
+  }
+  if (pixels.length !== width * height * 4) {
+    throw new RangeError("Pixel buffer length does not match its dimensions.");
+  }
+
+  const output = new Uint8ClampedArray(pixels);
+  const normalizedWidth = clamp(strokeWidth, 0, MAX_STROKE_WIDTH);
+  if (normalizedWidth === 0) {
+    return output;
+  }
+
+  const radius = Math.ceil(normalizedWidth);
+  const kernel: Array<{ x: number; y: number; opacity: number }> = [];
+  for (let y = -radius; y <= radius; y += 1) {
+    for (let x = -radius; x <= radius; x += 1) {
+      const opacity = clamp(normalizedWidth + 1 - Math.hypot(x, y), 0, 1);
+      if (opacity > 0) {
+        kernel.push({ x, y, opacity });
+      }
+    }
+  }
+
+  for (let sourceY = 0; sourceY < height; sourceY += 1) {
+    for (let sourceX = 0; sourceX < width; sourceX += 1) {
+      const sourceOffset = (sourceY * width + sourceX) * 4;
+      const sourceAlpha = pixels[sourceOffset + 3];
+      if (sourceAlpha === 0) continue;
+
+      let isBoundary = false;
+      boundarySearch:
+      for (let nearbyY = -1; nearbyY <= 1; nearbyY += 1) {
+        for (let nearbyX = -1; nearbyX <= 1; nearbyX += 1) {
+          if (nearbyX === 0 && nearbyY === 0) continue;
+          const x = sourceX + nearbyX;
+          const y = sourceY + nearbyY;
+          if (
+            x < 0 ||
+            x >= width ||
+            y < 0 ||
+            y >= height ||
+            pixels[(y * width + x) * 4 + 3] < sourceAlpha
+          ) {
+            isBoundary = true;
+            break boundarySearch;
+          }
+        }
+      }
+      if (!isBoundary) continue;
+
+      for (const sample of kernel) {
+        const targetX = sourceX + sample.x;
+        const targetY = sourceY + sample.y;
+        if (targetX < 0 || targetX >= width || targetY < 0 || targetY >= height) {
+          continue;
+        }
+
+        const targetOffset = (targetY * width + targetX) * 4;
+        const candidateAlpha = Math.round(sourceAlpha * sample.opacity);
+        if (candidateAlpha <= output[targetOffset + 3]) continue;
+
+        output[targetOffset] = pixels[sourceOffset];
+        output[targetOffset + 1] = pixels[sourceOffset + 1];
+        output[targetOffset + 2] = pixels[sourceOffset + 2];
+        output[targetOffset + 3] = candidateAlpha;
+      }
+    }
+  }
+
+  return output;
+}
+
+function expandCanvasStroke(canvas: HTMLCanvasElement, strokeWidth: number): void {
+  if (strokeWidth <= 0) return;
+  const context = getContext(canvas, true);
+  const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+  imageData.data.set(
+    expandStrokePixels(imageData.data, canvas.width, canvas.height, strokeWidth),
+  );
+  context.putImageData(imageData, 0, 0);
+}
+
 function transformCanvas(
   source: HTMLCanvasElement,
   rotation: number,
@@ -367,6 +462,7 @@ function validateSettings(settings: Settings): void {
   assertFinite("removal", settings.removal);
   assertFinite("feather", settings.feather);
   assertFinite("contrast", settings.contrast);
+  assertFinite("strokeWidth", settings.strokeWidth);
   assertFinite("rotation", settings.rotation);
 
   if (settings.inkColor !== null) {
@@ -384,6 +480,9 @@ function validateSettings(settings: Settings): void {
   }
   if (settings.targetHeight <= 0) {
     throw new RangeError("Target height must be greater than zero.");
+  }
+  if (settings.strokeWidth < 0 || settings.strokeWidth > MAX_STROKE_WIDTH) {
+    throw new RangeError("Stroke width must be between 0 and 6 pixels.");
   }
   if (settings.margin < 0) {
     throw new RangeError("Margin cannot be negative.");
@@ -508,6 +607,19 @@ export async function processSignature(
     transformedCanvas.height,
     settings,
   );
+  const inkCanvas = createCanvas(outputWidth, outputHeight);
+  const inkContext = getContext(inkCanvas);
+  inkContext.imageSmoothingEnabled = true;
+  inkContext.imageSmoothingQuality = "high";
+  inkContext.drawImage(
+    transformedCanvas,
+    placement.x,
+    placement.y,
+    placement.width,
+    placement.height,
+  );
+  expandCanvasStroke(inkCanvas, settings.strokeWidth);
+
   const outputCanvas = createCanvas(outputWidth, outputHeight);
   const outputContext = getContext(outputCanvas);
   if (settings.background === "white") {
@@ -518,13 +630,7 @@ export async function processSignature(
   }
   outputContext.imageSmoothingEnabled = true;
   outputContext.imageSmoothingQuality = "high";
-  outputContext.drawImage(
-    transformedCanvas,
-    placement.x,
-    placement.y,
-    placement.width,
-    placement.height,
-  );
+  outputContext.drawImage(inkCanvas, 0, 0);
 
   return {
     canvas: outputCanvas,

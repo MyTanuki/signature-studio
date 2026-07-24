@@ -64,6 +64,7 @@ const DEFAULT_SETTINGS: Settings = {
   removal: 30,
   feather: 18,
   contrast: 12,
+  strokeWidth: 1,
   inkColor: null,
   grayscale: false,
   autoCrop: true,
@@ -1050,6 +1051,7 @@ export default function SignatureStudio() {
               <RangeField label="ลบพื้นหลังสีขาว" value={settings.removal} min={0} max={100} suffix="" onChange={(value) => commitSettings({ removal: value })} />
               <RangeField label="ความนุ่มของขอบ" value={settings.feather} min={0} max={60} suffix="" onChange={(value) => commitSettings({ feather: value })} />
               <RangeField label="ความคมชัด" value={settings.contrast} min={-40} max={60} suffix="" onChange={(value) => commitSettings({ contrast: value })} />
+              <RangeField label="ขนาดเส้น" value={settings.strokeWidth} min={0} max={6} suffix="px" onChange={(value) => commitSettings({ strokeWidth: value })} />
 
               <div className="ink-color-field">
                 <div className="ink-color-heading">
