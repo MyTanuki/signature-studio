@@ -27,6 +27,45 @@ export interface Settings {
   alignY: VerticalAlignment;
 }
 
+export function resolveSignatureSettings(
+  globalSettings: Settings,
+  settingsOverride?: Partial<Settings>,
+): Settings {
+  return { ...globalSettings, ...settingsOverride };
+}
+
+export function createSignatureSettingsOverrides(
+  globalSettings: Settings,
+  values: Partial<Settings>,
+): Partial<Settings> {
+  return Object.fromEntries(
+    (Object.keys(values) as Array<keyof Settings>)
+      .filter(
+        (key) =>
+          values[key] !== undefined &&
+          !Object.is(values[key], globalSettings[key]),
+      )
+      .map((key) => [key, values[key]]),
+  ) as Partial<Settings>;
+}
+
+export function mergeSignatureSettingsOverrides(
+  globalSettings: Settings,
+  current: Partial<Settings> | undefined,
+  patch: Partial<Settings>,
+): Partial<Settings> {
+  return createSignatureSettingsOverrides(globalSettings, {
+    ...current,
+    ...patch,
+  });
+}
+
+export function hasSignatureSettingsOverrides(
+  settingsOverride?: Partial<Settings>,
+): boolean {
+  return Boolean(settingsOverride && Object.keys(settingsOverride).length);
+}
+
 export interface QualityReport {
   score: number;
   label: "Excellent" | "Good" | "Fair" | "Needs attention";

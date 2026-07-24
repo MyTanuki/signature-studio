@@ -14,8 +14,12 @@ import {
 } from "react";
 import {
   canvasToBlob,
+  createSignatureSettingsOverrides,
+  hasSignatureSettingsOverrides,
   loadImageSource,
+  mergeSignatureSettingsOverrides,
   processSignature,
+  resolveSignatureSettings,
   type QualityReport,
   type Settings,
 } from "./lib/signature-processing";
@@ -24,6 +28,15 @@ type AssetKind = "png" | "jpg" | "svg" | "pdf";
 type AssetStatus = "ready" | "warning" | "error" | "processing";
 type ViewMode = "original" | "split" | "output";
 type ExportFormat = "png" | "jpg" | "svg" | "pdf";
+type SettingsScope = "all" | "selected";
+
+type SettingsHistoryEntry =
+  | { scope: "all"; settings: Settings; presetId: string }
+  | {
+      scope: "selected";
+      assetId: string;
+      settingsOverride: Partial<Settings>;
+    };
 
 interface SignatureAsset {
   id: string;
@@ -34,6 +47,7 @@ interface SignatureAsset {
   width: number;
   height: number;
   status: AssetStatus;
+  settingsOverride?: Partial<Settings>;
   error?: string;
   pdfPage?: number;
   pdfPages?: number;
@@ -297,6 +311,7 @@ export default function SignatureStudio() {
   const [assets, setAssets] = useState<SignatureAsset[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
+  const [settingsScope, setSettingsScope] = useState<SettingsScope>("all");
   const [presetId, setPresetId] = useState("company");
   const [presetLocked, setPresetLocked] = useState(false);
   const [quality, setQuality] = useState<QualityReport | null>(null);
@@ -319,8 +334,8 @@ export default function SignatureStudio() {
   const inputRef = useRef<HTMLInputElement>(null);
   const outputCanvasRef = useRef<HTMLCanvasElement>(null);
   const previewStageRef = useRef<HTMLDivElement>(null);
-  const undoStack = useRef<Settings[]>([]);
-  const redoStack = useRef<Settings[]>([]);
+  const undoStack = useRef<SettingsHistoryEntry[]>([]);
+  const redoStack = useRef<SettingsHistoryEntry[]>([]);
   const objectUrls = useRef<Set<string>>(new Set());
   const processingGeneration = useRef(0);
 
@@ -328,38 +343,154 @@ export default function SignatureStudio() {
     () => assets.find((asset) => asset.id === selectedId) ?? assets[0] ?? null,
     [assets, selectedId],
   );
+  const selectedSettings = useMemo(
+    () => resolveSignatureSettings(settings, selected?.settingsOverride),
+    [selected?.settingsOverride, settings],
+  );
+  const selectedAssetId = selected?.id ?? null;
+  const selectedSourceUrl = selected?.sourceUrl ?? null;
+  const editorSettings = settingsScope === "selected" ? selectedSettings : settings;
+  const selectedHasOverrides = hasSignatureSettingsOverrides(
+    selected?.settingsOverride,
+  );
+  const selectedOverrideCount = Object.keys(selected?.settingsOverride ?? {}).length;
 
   const commitSettings = useCallback(
     (patch: Partial<Settings>, announce?: string) => {
-      undoStack.current = [...undoStack.current.slice(-39), settings];
+      if (settingsScope === "selected" && selected) {
+        undoStack.current = [
+          ...undoStack.current.slice(-39),
+          {
+            scope: "selected",
+            assetId: selected.id,
+            settingsOverride: { ...selected.settingsOverride },
+          },
+        ];
+        setAssets((current) =>
+          current.map((asset) => {
+            if (asset.id !== selected.id) return asset;
+            const settingsOverride = mergeSignatureSettingsOverrides(
+              settings,
+              asset.settingsOverride,
+              patch,
+            );
+            return {
+              ...asset,
+              settingsOverride: hasSignatureSettingsOverrides(settingsOverride)
+                ? settingsOverride
+                : undefined,
+            };
+          }),
+        );
+      } else {
+        undoStack.current = [
+          ...undoStack.current.slice(-39),
+          { scope: "all", settings, presetId },
+        ];
+        setSettings((current) => ({ ...current, ...patch }));
+        setPresetId("custom");
+      }
       redoStack.current = [];
-      setSettings((current) => ({ ...current, ...patch }));
-      setPresetId("custom");
       if (announce) setNotice(announce);
       setHistoryVersion((version) => version + 1);
     },
-    [settings],
+    [presetId, selected, settings, settingsScope],
+  );
+
+  const restoreHistoryEntry = useCallback(
+    (entry: SettingsHistoryEntry): SettingsHistoryEntry | null => {
+      if (entry.scope === "all") {
+        const current: SettingsHistoryEntry = {
+          scope: "all",
+          settings,
+          presetId,
+        };
+        setSettings(entry.settings);
+        setPresetId(entry.presetId);
+        return current;
+      }
+
+      const asset = assets.find((item) => item.id === entry.assetId);
+      if (!asset) return null;
+      const current: SettingsHistoryEntry = {
+        scope: "selected",
+        assetId: asset.id,
+        settingsOverride: { ...asset.settingsOverride },
+      };
+      setAssets((currentAssets) =>
+        currentAssets.map((item) =>
+          item.id === entry.assetId
+            ? {
+                ...item,
+                settingsOverride: hasSignatureSettingsOverrides(
+                  entry.settingsOverride,
+                )
+                  ? { ...entry.settingsOverride }
+                  : undefined,
+              }
+            : item,
+        ),
+      );
+      return current;
+    },
+    [assets, presetId, settings],
   );
 
   const undo = useCallback(() => {
     const previous = undoStack.current.pop();
     if (!previous) return;
-    redoStack.current.push(settings);
-    setSettings(previous);
-    setPresetId("custom");
-    setNotice("ย้อนกลับการปรับล่าสุดแล้ว");
+    const current = restoreHistoryEntry(previous);
+    if (!current) {
+      undoStack.current.push(previous);
+      return;
+    }
+    redoStack.current.push(current);
+    setNotice(
+      previous.scope === "all"
+        ? "ย้อนกลับค่าที่ใช้กับทุกลายเซ็นแล้ว"
+        : "ย้อนกลับค่าของลายเซ็นนี้แล้ว",
+    );
     setHistoryVersion((version) => version + 1);
-  }, [settings]);
+  }, [restoreHistoryEntry]);
 
   const redo = useCallback(() => {
     const next = redoStack.current.pop();
     if (!next) return;
-    undoStack.current.push(settings);
-    setSettings(next);
-    setPresetId("custom");
-    setNotice("ทำซ้ำการปรับแล้ว");
+    const current = restoreHistoryEntry(next);
+    if (!current) {
+      redoStack.current.push(next);
+      return;
+    }
+    undoStack.current.push(current);
+    setNotice(
+      next.scope === "all"
+        ? "ทำซ้ำค่าที่ใช้กับทุกลายเซ็นแล้ว"
+        : "ทำซ้ำค่าของลายเซ็นนี้แล้ว",
+    );
     setHistoryVersion((version) => version + 1);
-  }, [settings]);
+  }, [restoreHistoryEntry]);
+
+  const clearSelectedOverrides = useCallback(() => {
+    if (!selected || !hasSignatureSettingsOverrides(selected.settingsOverride)) return;
+    undoStack.current = [
+      ...undoStack.current.slice(-39),
+      {
+        scope: "selected",
+        assetId: selected.id,
+        settingsOverride: { ...selected.settingsOverride },
+      },
+    ];
+    redoStack.current = [];
+    setAssets((current) =>
+      current.map((asset) =>
+        asset.id === selected.id
+          ? { ...asset, settingsOverride: undefined }
+          : asset,
+      ),
+    );
+    setNotice(`คืนค่า “${selected.name}” ให้ใช้ค่ากลางทั้งหมดแล้ว`);
+    setHistoryVersion((version) => version + 1);
+  }, [selected]);
 
   useEffect(() => {
     try {
@@ -477,14 +608,14 @@ export default function SignatureStudio() {
   }, [ingestFiles, redo, undo]);
 
   useEffect(() => {
-    if (!selected) {
+    if (!selectedAssetId || !selectedSourceUrl) {
       setQuality(null);
       return;
     }
     const generation = ++processingGeneration.current;
     const timer = window.setTimeout(() => {
       setProcessing(true);
-      void processSignature(selected.sourceUrl, settings)
+      void processSignature(selectedSourceUrl, selectedSettings)
         .then((result) => {
           if (generation !== processingGeneration.current) return;
           const canvas = outputCanvasRef.current;
@@ -496,7 +627,7 @@ export default function SignatureStudio() {
           setQuality(result.quality);
           setAssets((current) =>
             current.map((asset) =>
-              asset.id === selected.id
+              asset.id === selectedAssetId
                 ? {
                     ...asset,
                     status: result.quality.score >= 60 ? "ready" : "warning",
@@ -515,7 +646,7 @@ export default function SignatureStudio() {
         });
     }, 120);
     return () => window.clearTimeout(timer);
-  }, [selected, settings]);
+  }, [selectedAssetId, selectedSettings, selectedSourceUrl]);
 
   const removeAsset = useCallback(
     (id: string) => {
@@ -525,8 +656,16 @@ export default function SignatureStudio() {
         objectUrls.current.delete(target.sourceUrl);
       }
       const next = assets.filter((asset) => asset.id !== id);
+      undoStack.current = undoStack.current.filter(
+        (entry) => entry.scope === "all" || entry.assetId !== id,
+      );
+      redoStack.current = redoStack.current.filter(
+        (entry) => entry.scope === "all" || entry.assetId !== id,
+      );
       setAssets(next);
       if (selectedId === id) setSelectedId(next[0]?.id ?? null);
+      if (!next.length) setSettingsScope("all");
+      setHistoryVersion((version) => version + 1);
       setNotice("นำไฟล์ออกจากพื้นที่ทำงานแล้ว");
     },
     [assets, selectedId],
@@ -538,8 +677,12 @@ export default function SignatureStudio() {
       if (asset.sourceUrl.startsWith("blob:")) URL.revokeObjectURL(asset.sourceUrl);
     }
     objectUrls.current.clear();
+    undoStack.current = [];
+    redoStack.current = [];
     setAssets([]);
     setSelectedId(null);
+    setSettingsScope("all");
+    setHistoryVersion((version) => version + 1);
     setNotice("ล้างพื้นที่ทำงานแล้ว");
   }, [assets]);
 
@@ -584,14 +727,48 @@ export default function SignatureStudio() {
     (id: string) => {
       const preset = PRESETS.find((item) => item.id === id);
       if (!preset) return;
-      undoStack.current = [...undoStack.current.slice(-39), settings];
+      const presetSettings = { ...DEFAULT_SETTINGS, ...preset.values };
+      if (settingsScope === "selected" && selected) {
+        undoStack.current = [
+          ...undoStack.current.slice(-39),
+          {
+            scope: "selected",
+            assetId: selected.id,
+            settingsOverride: { ...selected.settingsOverride },
+          },
+        ];
+        const settingsOverride = createSignatureSettingsOverrides(
+          settings,
+          presetSettings,
+        );
+        setAssets((current) =>
+          current.map((asset) =>
+            asset.id === selected.id
+              ? {
+                  ...asset,
+                  settingsOverride: hasSignatureSettingsOverrides(
+                    settingsOverride,
+                  )
+                    ? settingsOverride
+                    : undefined,
+                }
+              : asset,
+          ),
+        );
+        setNotice(`ใช้พรีเซ็ต “${preset.name}” กับ “${selected.name}” แล้ว`);
+      } else {
+        undoStack.current = [
+          ...undoStack.current.slice(-39),
+          { scope: "all", settings, presetId },
+        ];
+        setSettings(presetSettings);
+        setPresetId(id);
+        setNotice(`ใช้พรีเซ็ต “${preset.name}” กับทุกลายเซ็นแล้ว`);
+      }
       redoStack.current = [];
-      setSettings({ ...DEFAULT_SETTINGS, ...preset.values });
-      setPresetId(id);
-      setNotice(`ใช้พรีเซ็ต “${preset.name}” แล้ว`);
       setHistoryVersion((version) => version + 1);
     },
-    [settings],
+    [presetId, selected, settings, settingsScope],
   );
 
   const encodeCanvas = useCallback(
@@ -642,8 +819,8 @@ export default function SignatureStudio() {
     try {
       const renderSettings =
         exportFormat === "jpg" || exportFormat === "pdf"
-          ? { ...settings, background: "white" as const }
-          : settings;
+          ? { ...selectedSettings, background: "white" as const }
+          : selectedSettings;
       const result = await processSignature(selected.sourceUrl, renderSettings);
       const blob = await encodeCanvas(result.canvas, exportFormat);
       downloadBlob(
@@ -656,7 +833,7 @@ export default function SignatureStudio() {
     } finally {
       setExporting(false);
     }
-  }, [encodeCanvas, exportFormat, selected, settings]);
+  }, [encodeCanvas, exportFormat, selected, selectedSettings]);
 
   const exportAll = useCallback(async () => {
     if (!assets.length) return;
@@ -669,10 +846,14 @@ export default function SignatureStudio() {
       const usedNames = new Set<string>();
       for (let index = 0; index < assets.length; index += 1) {
         const asset = assets[index];
+        const assetSettings = resolveSignatureSettings(
+          settings,
+          asset.settingsOverride,
+        );
         const renderSettings =
           exportFormat === "jpg" || exportFormat === "pdf"
-            ? { ...settings, background: "white" as const }
-            : settings;
+            ? { ...assetSettings, background: "white" as const }
+            : assetSettings;
         const result = await processSignature(asset.sourceUrl, renderSettings);
         const blob = await encodeCanvas(result.canvas, exportFormat);
         let filename = `${safeFilename(baseName(asset.name))}-normalized.${exportFormat}`;
@@ -729,8 +910,13 @@ export default function SignatureStudio() {
     event.currentTarget.setPointerCapture(event.pointerId);
   };
 
-  const currentPreset = PRESETS.find((preset) => preset.id === presetId);
-  const safeAreaInset = `${Math.min(45, (settings.margin / settings.outputHeight) * 100)}%`;
+  const editorPresetId = settingsScope === "all" ? presetId : "custom";
+  const currentPreset =
+    settingsScope === "all"
+      ? PRESETS.find((preset) => preset.id === presetId)
+      : undefined;
+  const settingsLocked = settingsScope === "all" && presetLocked;
+  const safeAreaInset = `${Math.min(45, (selectedSettings.margin / selectedSettings.outputHeight) * 100)}%`;
 
   return (
     <main className="studio-shell">
@@ -839,6 +1025,9 @@ export default function SignatureStudio() {
                       <span aria-hidden="true" />
                       {asset.status === "processing" ? "กำลังประมวลผล" : asset.status === "warning" ? "ควรตรวจสอบ" : asset.status === "error" ? "เปิดไม่ได้" : "พร้อมส่งออก"}
                     </span>
+                    {hasSignatureSettingsOverrides(asset.settingsOverride) && (
+                      <span className="override-badge">ปรับเฉพาะไฟล์</span>
+                    )}
                   </span>
                 </button>
                 <button
@@ -901,7 +1090,7 @@ export default function SignatureStudio() {
               <div className="preview-viewport">
                 <div className="ruler ruler-horizontal" aria-hidden={!showRuler} data-visible={showRuler} />
                 <div className="ruler ruler-vertical" aria-hidden={!showRuler} data-visible={showRuler} />
-                <div ref={previewStageRef} className="preview-stage" style={{ aspectRatio: `${settings.outputWidth} / ${settings.outputHeight}`, transform: `scale(${zoom / 100})` }}>
+                <div ref={previewStageRef} className="preview-stage" style={{ aspectRatio: `${selectedSettings.outputWidth} / ${selectedSettings.outputHeight}`, transform: `scale(${zoom / 100})` }}>
                   {(viewMode === "original" || viewMode === "split") && (
                     <div
                       className="preview-pane original-pane"
@@ -913,10 +1102,10 @@ export default function SignatureStudio() {
                   )}
                   {(viewMode === "output" || viewMode === "split") && (
                     <div
-                      className={`preview-pane output-pane ${settings.background === "transparent" ? "checkerboard" : "white-background"}`}
+                      className={`preview-pane output-pane ${selectedSettings.background === "transparent" ? "checkerboard" : "white-background"}`}
                     >
                       <div className="pane-label">ผลลัพธ์</div>
-                      <canvas ref={outputCanvasRef} aria-label={`ผลลัพธ์ ${settings.outputWidth} คูณ ${settings.outputHeight} พิกเซล`} />
+                      <canvas ref={outputCanvasRef} aria-label={`ผลลัพธ์ ${selectedSettings.outputWidth} คูณ ${selectedSettings.outputHeight} พิกเซล`} />
                       <div className="safe-area" style={{ inset: safeAreaInset }} aria-hidden="true" />
                     </div>
                   )}
@@ -991,39 +1180,90 @@ export default function SignatureStudio() {
 
         <aside className={`inspector-panel ${inspectorOpen ? "mobile-open" : ""}`} aria-label="การตั้งค่า">
           <div className="panel-heading inspector-heading">
-            <div><h2>การตั้งค่า</h2><p>ใช้กับทุกไฟล์ในรายการ</p></div>
+            <div>
+              <h2>การตั้งค่า</h2>
+              <p>
+                {settingsScope === "all"
+                  ? "ค่าเริ่มต้นสำหรับทุกลายเซ็น"
+                  : `กำลังปรับเฉพาะ ${selected?.name ?? "ลายเซ็นที่เลือก"}`}
+              </p>
+            </div>
             <button className="icon-button mobile-close" type="button" onClick={() => setInspectorOpen(false)} aria-label="ปิดการตั้งค่า">×</button>
           </div>
 
           <div className="inspector-scroll">
+            <section className="scope-section" aria-label="ขอบเขตการปรับ">
+              <div className="scope-heading">
+                <div><span className="section-kicker">SCOPE</span><h3>ขอบเขตการปรับ</h3></div>
+                {settingsScope === "selected" && selectedHasOverrides && (
+                  <span className="override-count">{selectedOverrideCount} ค่าเฉพาะ</span>
+                )}
+              </div>
+              <div className="scope-control" role="group" aria-label="เลือกขอบเขตการตั้งค่า">
+                <button
+                  type="button"
+                  className={settingsScope === "all" ? "active" : ""}
+                  onClick={() => setSettingsScope("all")}
+                  aria-pressed={settingsScope === "all"}
+                >
+                  ทุกลายเซ็น
+                </button>
+                <button
+                  type="button"
+                  className={settingsScope === "selected" ? "active" : ""}
+                  onClick={() => setSettingsScope("selected")}
+                  aria-pressed={settingsScope === "selected"}
+                  disabled={!selected}
+                >
+                  เฉพาะลายเซ็นนี้
+                </button>
+              </div>
+              <p>
+                {settingsScope === "all"
+                  ? "ค่าที่เปลี่ยนจะเป็นค่าเริ่มต้นของทุกลายเซ็น"
+                  : "ค่าที่ไม่ได้แก้ยังคงตามค่ากลาง และไม่กระทบลายเซ็นอื่น"}
+              </p>
+              {settingsScope === "selected" && selectedHasOverrides && (
+                <button className="text-button" type="button" onClick={clearSelectedOverrides}>
+                  คืนค่ากลางของลายเซ็นนี้
+                </button>
+              )}
+            </section>
+
             <section className="setting-section">
               <div className="section-title-row">
                 <div><span className="section-kicker">PRESET</span><h3>ค่ามาตรฐาน</h3></div>
-                <button
-                  className={`lock-button ${presetLocked ? "locked" : ""}`}
-                  type="button"
-                  onClick={() => setPresetLocked((value) => !value)}
-                  aria-pressed={presetLocked}
-                >
-                  {presetLocked ? "● ล็อกอยู่" : "○ ปลดล็อก"}
-                </button>
+                {settingsScope === "all" && (
+                  <button
+                    className={`lock-button ${presetLocked ? "locked" : ""}`}
+                    type="button"
+                    onClick={() => setPresetLocked((value) => !value)}
+                    aria-pressed={presetLocked}
+                  >
+                    {presetLocked ? "● ล็อกอยู่" : "○ ปลดล็อก"}
+                  </button>
+                )}
               </div>
               <label className="field-label">
                 <span>พรีเซ็ต</span>
-                <select value={presetId} onChange={(event) => applyPreset(event.target.value)}>
-                  {presetId === "custom" && <option value="custom">กำหนดเอง</option>}
+                <select value={editorPresetId} onChange={(event) => applyPreset(event.target.value)}>
+                  {editorPresetId === "custom" && <option value="custom">กำหนดเอง</option>}
                   {PRESETS.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}</option>)}
                 </select>
-                <small>{currentPreset?.note ?? "ค่าที่ปรับเองจะบันทึกในเบราว์เซอร์"}</small>
+                <small>
+                  {settingsScope === "selected"
+                    ? "พรีเซ็ตที่เลือกจะใช้เฉพาะลายเซ็นนี้"
+                    : currentPreset?.note ?? "ค่าที่ปรับเองจะบันทึกในเบราว์เซอร์"}
+                </small>
               </label>
-              {presetLocked && <div className="locked-note">ค่าหลักถูกล็อกตามมาตรฐานบริษัท ปลดล็อกเพื่อแก้ไข</div>}
+              {settingsLocked && <div className="locked-note">ค่าหลักถูกล็อกตามมาตรฐานบริษัท ปลดล็อกเพื่อแก้ไข</div>}
 
               <div className="two-column-fields">
-                <label className="field-label"><span>ความกว้าง Canvas <small>px</small></span><input type="number" min="120" max="5000" value={settings.outputWidth} disabled={presetLocked} onChange={(event) => commitSettings({ outputWidth: Number(event.target.value) })} /></label>
-                <label className="field-label"><span>ความสูง Canvas <small>px</small></span><input type="number" min="80" max="5000" value={settings.outputHeight} disabled={presetLocked} onChange={(event) => commitSettings({ outputHeight: Number(event.target.value) })} /></label>
+                <label className="field-label"><span>ความกว้าง Canvas <small>px</small></span><input type="number" min="120" max="5000" value={editorSettings.outputWidth} disabled={settingsLocked} onChange={(event) => commitSettings({ outputWidth: Number(event.target.value) })} /></label>
+                <label className="field-label"><span>ความสูง Canvas <small>px</small></span><input type="number" min="80" max="5000" value={editorSettings.outputHeight} disabled={settingsLocked} onChange={(event) => commitSettings({ outputHeight: Number(event.target.value) })} /></label>
               </div>
-              <RangeField label="ขนาดลายเซ็น" value={settings.targetHeight} min={20} max={1000} suffix="px" disabled={presetLocked} onChange={(value) => commitSettings({ targetHeight: value })} />
-              <RangeField label="ระยะขอบปลอดภัย" value={settings.margin} min={0} max={Math.floor(Math.min(settings.outputWidth, settings.outputHeight) / 3)} suffix="px" disabled={presetLocked} onChange={(value) => commitSettings({ margin: value })} />
+              <RangeField label="ขนาดลายเซ็น" value={editorSettings.targetHeight} min={20} max={1000} suffix="px" disabled={settingsLocked} onChange={(value) => commitSettings({ targetHeight: value })} />
+              <RangeField label="ระยะขอบปลอดภัย" value={editorSettings.margin} min={0} max={Math.floor(Math.min(editorSettings.outputWidth, editorSettings.outputHeight) / 3)} suffix="px" disabled={settingsLocked} onChange={(value) => commitSettings({ margin: value })} />
 
               <div className="alignment-field">
                 <span>ตำแหน่งลายเซ็น</span>
@@ -1033,10 +1273,10 @@ export default function SignatureStudio() {
                       <button
                         key={`${vertical}-${horizontal}`}
                         type="button"
-                        className={settings.alignX === horizontal && settings.alignY === vertical ? "active" : ""}
+                        className={editorSettings.alignX === horizontal && editorSettings.alignY === vertical ? "active" : ""}
                         onClick={() => commitSettings({ alignX: horizontal, alignY: vertical })}
                         aria-label={`${horizontal} ${vertical}`}
-                        disabled={presetLocked}
+                        disabled={settingsLocked}
                       ><span /></button>
                     )),
                   )}
@@ -1046,24 +1286,24 @@ export default function SignatureStudio() {
 
             <section className="setting-section">
               <div className="section-title-row"><div><span className="section-kicker">CLEANUP</span><h3>พื้นหลังและภาพ</h3></div></div>
-              <ToggleField label="ครอบตัดอัตโนมัติ" note="หาเส้นลายเซ็นและตัดพื้นที่ว่าง" checked={settings.autoCrop} onChange={(checked) => commitSettings({ autoCrop: checked })} />
-              <ToggleField label="แปลงเป็นขาวดำ" note="เหมาะกับเอกสารทางการ" checked={settings.grayscale} onChange={(checked) => commitSettings({ grayscale: checked })} />
-              <RangeField label="ลบพื้นหลังสีขาว" value={settings.removal} min={0} max={100} suffix="" onChange={(value) => commitSettings({ removal: value })} />
-              <RangeField label="ความนุ่มของขอบ" value={settings.feather} min={0} max={60} suffix="" onChange={(value) => commitSettings({ feather: value })} />
-              <RangeField label="ความคมชัด" value={settings.contrast} min={-40} max={60} suffix="" onChange={(value) => commitSettings({ contrast: value })} />
-              <RangeField label="ขนาดเส้น" value={settings.strokeWidth} min={0} max={6} suffix="px" onChange={(value) => commitSettings({ strokeWidth: value })} />
+              <ToggleField label="ครอบตัดอัตโนมัติ" note="หาเส้นลายเซ็นและตัดพื้นที่ว่าง" checked={editorSettings.autoCrop} onChange={(checked) => commitSettings({ autoCrop: checked })} />
+              <ToggleField label="แปลงเป็นขาวดำ" note="เหมาะกับเอกสารทางการ" checked={editorSettings.grayscale} onChange={(checked) => commitSettings({ grayscale: checked })} />
+              <RangeField label="ลบพื้นหลังสีขาว" value={editorSettings.removal} min={0} max={100} suffix="" onChange={(value) => commitSettings({ removal: value })} />
+              <RangeField label="ความนุ่มของขอบ" value={editorSettings.feather} min={0} max={60} suffix="" onChange={(value) => commitSettings({ feather: value })} />
+              <RangeField label="ความคมชัด" value={editorSettings.contrast} min={-40} max={60} suffix="" onChange={(value) => commitSettings({ contrast: value })} />
+              <RangeField label="ขนาดเส้น" value={editorSettings.strokeWidth} min={0} max={6} suffix="px" onChange={(value) => commitSettings({ strokeWidth: value })} />
 
               <div className="ink-color-field">
                 <div className="ink-color-heading">
                   <span>สีลายเซ็น</span>
-                  <output>{settings.inkColor ?? "สีต้นฉบับ"}</output>
+                  <output>{editorSettings.inkColor ?? "สีต้นฉบับ"}</output>
                 </div>
                 <div className="ink-color-grid" role="group" aria-label="ชุดสีลายเซ็น">
                   <button
                     type="button"
-                    className={`ink-color-original${settings.inkColor === null ? " active" : ""}`}
+                    className={`ink-color-original${editorSettings.inkColor === null ? " active" : ""}`}
                     onClick={() => commitSettings({ inkColor: null })}
-                    aria-pressed={settings.inkColor === null}
+                    aria-pressed={editorSettings.inkColor === null}
                   >
                     ต้นฉบับ
                   </button>
@@ -1071,11 +1311,11 @@ export default function SignatureStudio() {
                     <button
                       key={preset.value}
                       type="button"
-                      className={`ink-color-swatch${settings.inkColor === preset.value ? " active" : ""}`}
+                      className={`ink-color-swatch${editorSettings.inkColor === preset.value ? " active" : ""}`}
                       style={{ "--ink-color": preset.value } as CSSProperties}
                       onClick={() => commitSettings({ inkColor: preset.value })}
                       aria-label={`${preset.name} ${preset.value}`}
-                      aria-pressed={settings.inkColor === preset.value}
+                      aria-pressed={editorSettings.inkColor === preset.value}
                       title={`${preset.name} ${preset.value}`}
                     />
                   ))}
@@ -1085,25 +1325,25 @@ export default function SignatureStudio() {
                   <span>
                     <input
                       type="color"
-                      value={settings.inkColor ?? DEFAULT_CUSTOM_INK_COLOR}
+                      value={editorSettings.inkColor ?? DEFAULT_CUSTOM_INK_COLOR}
                       onChange={(event) => commitSettings({ inkColor: event.target.value.toUpperCase() })}
                       aria-label="เลือกสีลายเซ็นจากตารางสี"
                     />
-                    <code>{settings.inkColor ?? DEFAULT_CUSTOM_INK_COLOR}</code>
+                    <code>{editorSettings.inkColor ?? DEFAULT_CUSTOM_INK_COLOR}</code>
                   </span>
                 </label>
               </div>
 
               <div className="background-choice" role="group" aria-label="พื้นหลังผลลัพธ์">
-                <button className={settings.background === "transparent" ? "active" : ""} type="button" onClick={() => commitSettings({ background: "transparent" })}><span className="choice-swatch checkerboard" /> โปร่งใส</button>
-                <button className={settings.background === "white" ? "active" : ""} type="button" onClick={() => commitSettings({ background: "white" })}><span className="choice-swatch white-background" /> สีขาว</button>
+                <button className={editorSettings.background === "transparent" ? "active" : ""} type="button" onClick={() => commitSettings({ background: "transparent" })}><span className="choice-swatch checkerboard" /> โปร่งใส</button>
+                <button className={editorSettings.background === "white" ? "active" : ""} type="button" onClick={() => commitSettings({ background: "white" })}><span className="choice-swatch white-background" /> สีขาว</button>
               </div>
 
               <div className="transform-row" role="group" aria-label="หมุนและกลับด้าน">
-                <button type="button" onClick={() => commitSettings({ rotation: (settings.rotation - 90) % 360 })}>↶ 90°</button>
-                <button type="button" onClick={() => commitSettings({ rotation: (settings.rotation + 90) % 360 })}>↷ 90°</button>
-                <button className={settings.flipX ? "active" : ""} type="button" onClick={() => commitSettings({ flipX: !settings.flipX })}>↔ กลับซ้ายขวา</button>
-                <button className={settings.flipY ? "active" : ""} type="button" onClick={() => commitSettings({ flipY: !settings.flipY })}>↕ กลับบนล่าง</button>
+                <button type="button" onClick={() => commitSettings({ rotation: (editorSettings.rotation - 90) % 360 })}>↶ 90°</button>
+                <button type="button" onClick={() => commitSettings({ rotation: (editorSettings.rotation + 90) % 360 })}>↷ 90°</button>
+                <button className={editorSettings.flipX ? "active" : ""} type="button" onClick={() => commitSettings({ flipX: !editorSettings.flipX })}>↔ กลับซ้ายขวา</button>
+                <button className={editorSettings.flipY ? "active" : ""} type="button" onClick={() => commitSettings({ flipY: !editorSettings.flipY })}>↕ กลับบนล่าง</button>
               </div>
             </section>
 
@@ -1136,7 +1376,7 @@ export default function SignatureStudio() {
               <div className="section-title-row"><div><span className="section-kicker">EXPORT</span><h3>ส่งออก</h3></div></div>
               <label className="field-label"><span>รูปแบบไฟล์</span><select value={exportFormat} onChange={(event) => setExportFormat(event.target.value as ExportFormat)}><option value="png">PNG — โปร่งใส คมชัด</option><option value="jpg">JPG — พื้นหลังขาว</option><option value="svg">SVG — Raster ภายใน Vector</option><option value="pdf">PDF — พร้อมแทรกเอกสาร</option></select></label>
               {exportFormat === "jpg" && <RangeField label="คุณภาพ JPG" value={jpgQuality} min={60} max={100} suffix="%" onChange={setJpgQuality} />}
-              <div className="export-summary"><span>ขนาดผลลัพธ์</span><strong>{settings.outputWidth.toLocaleString()} × {settings.outputHeight.toLocaleString()} px</strong></div>
+              <div className="export-summary"><span>ขนาดผลลัพธ์</span><strong>{selectedSettings.outputWidth.toLocaleString()} × {selectedSettings.outputHeight.toLocaleString()} px</strong></div>
               <button className="primary-button full-width" type="button" onClick={() => void exportOne()} disabled={!selected || exporting}>{exporting ? "กำลังเตรียมไฟล์…" : "ส่งออกไฟล์ที่เลือก"}</button>
               {assets.length > 1 && <button className="secondary-button full-width" type="button" onClick={() => void exportAll()} disabled={exporting}>ดาวน์โหลด ZIP ({assets.length} ไฟล์)</button>}
             </section>

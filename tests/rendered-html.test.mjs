@@ -58,6 +58,15 @@ test("keeps processing local and removes starter-only dependencies", async () =>
   assert.match(studio, /\{ name: "น้ำเงินหมึก", value: "#1F3E98" \}/);
   assert.match(studio, /strokeWidth: 1/);
   assert.match(studio, /label="ขนาดเส้น".*min=\{0\} max=\{6\}.*strokeWidth/s);
+  assert.match(studio, /settingsOverride\?: Partial<Settings>/);
+  assert.match(studio, /useState<SettingsScope>\("all"\)/);
+  assert.match(studio, /ทุกลายเซ็น/);
+  assert.match(studio, /เฉพาะลายเซ็นนี้/);
+  assert.match(studio, /processSignature\(selectedSourceUrl, selectedSettings\)/);
+  assert.match(
+    studio,
+    /resolveSignatureSettings\(\s*settings,\s*asset\.settingsOverride,\s*\)/s,
+  );
   assert.match(processing, /visibleDarkness\(red, green, blue, alpha\) \/ 255/);
   assert.match(processing, /inkColor must be a six-digit hex color/);
   assert.doesNotMatch(studio, /fetch\(["']https?:\/\//i);
@@ -79,7 +88,7 @@ test("keeps the signature aspect ratio independent from canvas dimensions", asyn
   assert.match(studio, /ความกว้าง Canvas.*ความสูง Canvas/s);
   assert.match(
     studio,
-    /aspectRatio: `\$\{settings\.outputWidth\} \/ \$\{settings\.outputHeight\}`/,
+    /aspectRatio: `\$\{selectedSettings\.outputWidth\} \/ \$\{selectedSettings\.outputHeight\}`/,
   );
   assert.match(
     studio,
@@ -153,4 +162,54 @@ test("increases visible ink coverage when the stroke slider increases", async ()
   assert.equal(expanded[centerOffset + 3], 255);
   assert.equal(expanded[(3 * width + 4) * 4 + 3], 255);
   assert.equal(pixels[(3 * width + 4) * 4 + 3], 0);
+});
+test("inherits global settings and keeps per-signature overrides isolated", async () => {
+  const {
+    createSignatureSettingsOverrides,
+    hasSignatureSettingsOverrides,
+    mergeSignatureSettingsOverrides,
+    resolveSignatureSettings,
+  } = await import(
+    new URL("../app/lib/signature-processing.ts", import.meta.url).href,
+  );
+  const globalSettings = {
+    contrast: 12,
+    strokeWidth: 1,
+    margin: 30,
+    inkColor: null,
+  };
+
+  const firstOverrides = mergeSignatureSettingsOverrides(
+    globalSettings,
+    undefined,
+    { contrast: 42 },
+  );
+  const firstSignature = resolveSignatureSettings(globalSettings, firstOverrides);
+  const secondSignature = resolveSignatureSettings(globalSettings);
+
+  assert.deepEqual(firstOverrides, { contrast: 42 });
+  assert.equal(firstSignature.contrast, 42);
+  assert.equal(secondSignature.contrast, 12);
+
+  const changedGlobals = { ...globalSettings, margin: 45 };
+  assert.equal(resolveSignatureSettings(changedGlobals, firstOverrides).margin, 45);
+  assert.equal(resolveSignatureSettings(changedGlobals, firstOverrides).contrast, 42);
+
+  const inheritedAgain = mergeSignatureSettingsOverrides(
+    globalSettings,
+    firstOverrides,
+    { contrast: globalSettings.contrast },
+  );
+  assert.deepEqual(inheritedAgain, {});
+  assert.equal(hasSignatureSettingsOverrides(inheritedAgain), false);
+
+  const presetOverrides = createSignatureSettingsOverrides(globalSettings, {
+    ...globalSettings,
+    strokeWidth: 4,
+    inkColor: "#1F3E98",
+  });
+  assert.deepEqual(presetOverrides, {
+    strokeWidth: 4,
+    inkColor: "#1F3E98",
+  });
 });
